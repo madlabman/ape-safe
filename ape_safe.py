@@ -275,23 +275,29 @@ class ApeSafe(Safe):
         results = requests.get(url).json()['results']
         nonce = self.retrieve_nonce()
         transactions = [
-            self.build_multisig_tx(
-                to=tx['to'],
-                value=int(tx['value']),
-                data=HexBytes(tx['data'] or b''),
-                operation=tx['operation'],
-                safe_tx_gas=tx['safeTxGas'],
-                base_gas=tx['baseGas'],
-                gas_price=int(tx['gasPrice']),
-                gas_token=tx['gasToken'],
-                refund_receiver=tx['refundReceiver'],
-                signatures=self.confirmations_to_signatures(tx['confirmations']),
-                safe_nonce=tx['nonce'],
-            )
+            self.safe_tx_from_api_tx(tx)
             for tx in reversed(results)
             if tx['nonce'] >= nonce and not tx['isExecuted']
         ]
         return transactions
+
+    def safe_tx_from_api_tx(self, tx: dict) -> SafeTx:
+        """
+        Build SafeTx object from the dict recieved from Safe Api
+        """
+        return self.build_multisig_tx(
+            to=tx['to'],
+            value=int(tx['value']),
+            data=HexBytes(tx['data'] or b''),
+            operation=tx['operation'],
+            safe_tx_gas=tx['safeTxGas'],
+            base_gas=tx['baseGas'],
+            gas_price=int(tx['gasPrice']),
+            gas_token=tx['gasToken'],
+            refund_receiver=tx['refundReceiver'],
+            signatures=self.confirmations_to_signatures(tx['confirmations']),
+            safe_nonce=tx['nonce'],
+        )
 
     def confirmations_to_signatures(self, confirmations: List[Dict]) -> bytes:
         """
@@ -385,6 +391,15 @@ class ApeSafe(Safe):
         """
         for safe_tx in self.pending_transactions:
             self.preview_tx(safe_tx, events=events, call_trace=call_trace)
+
+    def get_safe_tx_by_safe_tx_hash(self, safe_tx_hash: str) -> SafeTx:
+        """
+        Retrieve SafeTx by its hash
+        """
+        tx = requests.get(f"{transaction_service[chain.id]}/api/v1/multisig-transactions/{safe_tx_hash}").json()
+        if 'Not found' in tx.get('detail', ''):
+            raise ValueError(f'SafeTx with hash {safe_tx_hash} not found')
+        return self.safe_tx_from_api_tx(tx)
 
     @staticmethod
     def get_safe_txhash_from_execution_tx(tx: Union[str,TransactionReceipt]) -> str:
